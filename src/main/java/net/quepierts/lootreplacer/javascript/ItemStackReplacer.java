@@ -4,7 +4,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.TextComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.ai.attributes.Attribute;
@@ -31,9 +30,8 @@ public class ItemStackReplacer {
         return this;
     }
 
-    public ItemStackReplacer name(String text) {
-        pStack.setHoverName(new TextComponent(text));
-        return this;
+    public TextBuilder name() {
+        return new TextBuilder(pStack.getHoverName());
     }
 
     public ItemStackReplacer lore(TextBuilder[] builders) {
@@ -99,12 +97,21 @@ public class ItemStackReplacer {
         return pStack.getOrCreateTag();
     }
 
-    public ItemStackReplacer setCount(int count) {
+    public ItemStackReplacer amount(int count) {
         pStack.setCount(count);
         return this;
     }
 
-    public int getCount() {
+    public int amount() {
         return pStack.getCount();
+    }
+
+    public ItemStackReplacer damage(int damage) {
+        pStack.setDamageValue(damage);
+        return this;
+    }
+
+    public int damage() {
+        return pStack.getDamageValue();
     }
 }

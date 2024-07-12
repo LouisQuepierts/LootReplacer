@@ -1,5 +1,6 @@
 package net.quepierts.lootreplacer.javascript;
 
+import jdk.dynalink.beans.StaticClass;
 import net.minecraft.ChatFormatting;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
@@ -33,6 +34,7 @@ public class ReplacerManager {
     private static final Path SCRIPT_DIR = Path.of("scripts/loot_replacer");
     private static final Path EXAMPLE_PATH = Path.of("scripts/loot_replacer/example.js");
     private static final Map<Item, JSFunction> REPLACER_MAP = new HashMap<>();
+    private static final Map<Item, ItemStack> STATIC_REPLACEMENTS = new HashMap<>();
     private static final Pattern PATTERN_FUNCTION = Pattern.compile("function\\s+([a-zA-Z0-9]+\\$[a-zA-Z0-9_]+)\\s*\\(replacer\\)");
     private static final NashornScriptEngineFactory FACTORY = new NashornScriptEngineFactory();
 
@@ -69,16 +71,15 @@ public class ReplacerManager {
             return false;
         }
 
-        engine.put("ItemStackReplacer", ItemStackReplacer.class);
-        engine.put("ChatFormatting", ChatFormatting.class);
+        engine.put("AttributeModifierOperation", StaticClass.forClass(AttributeModifier.Operation.class));
+        engine.put("EquipmentSlot", StaticClass.forClass(EquipmentSlot.class));
+        engine.put("Attributes", StaticClass.forClass(Attributes.class));
+        engine.put("ChatFormatting", StaticClass.forClass(ChatFormatting.class));
+        engine.put("NBT", StaticClass.forClass(CompoundTag.class));
+        engine.put("Colors", StaticClass.forClass(Color.class));
+        engine.put("utils", StaticClass.forClass(ReplacerUtils.class));
         engine.put("TextBuilder", TextBuilder.class);
-        engine.put("AttributeModifierOperation", AttributeModifier.Operation.class);
-        engine.put("EquipmentSlot", EquipmentSlot.class);
-        engine.put("Attributes", Attributes.class);
-        engine.put("NBT", CompoundTag.class);
-        engine.put("colors", new Color());
-        engine.put("utils", new ReplacerUtils());
-
+        engine.put("ItemStackReplacer", ItemStackReplacer.class);
         invoker = engine;
         return true;
     }
@@ -89,6 +90,7 @@ public class ReplacerManager {
         }
 
         REPLACER_MAP.clear();
+        STATIC_REPLACEMENTS.clear();
 
         LootReplacer.LOGGER.info("Loading Scripts From Directory...");
         if (!Files.exists(SCRIPT_DIR)) {
@@ -121,16 +123,28 @@ public class ReplacerManager {
                 compiled.eval();
 
                 for (String replacer : set) {
-                    ResourceLocation location = new ResourceLocation(replacer.replace('$', ':'));
+                    boolean bStatic = replacer.startsWith("static");
+                    String name = (bStatic ? replacer.substring(7) : replacer).replace('$', ':');
+                    ResourceLocation location = new ResourceLocation(name);
                     Item item = ForgeRegistries.ITEMS.getValue(location);
 
-                    LootReplacer.LOGGER.info("Loaded replacer: {} for item {}", replacer, location);
+                    LootReplacer.LOGGER.info("Loaded replacer: {} for item {}, static: {}", replacer, location, bStatic);
 
                     if (item != Items.AIR) {
                         JSFunction function = new JSFunction(replacer, compiled);
 
-                        if (checkFunction(function)) {
+                        ItemStack replacement = new ItemStack(item, 1);
+
+                        try {
+                            function.invoke(new ItemStackReplacer(replacement));
                             REPLACER_MAP.put(item, function);
+
+                            if (bStatic)
+                                STATIC_REPLACEMENTS.put(item, replacement);
+
+                        } catch (NoSuchMethodException e) {
+                            LootReplacer.LOGGER.warn("Replacer {} Error:", function.name);
+                            LootReplacer.LOGGER.warn(e.getMessage());
                         }
                     }
                 }
@@ -143,11 +157,19 @@ public class ReplacerManager {
     }
 
     public static void applyReplacer(ItemStack pStack) {
+        Item item = pStack.getItem();
+
+        ItemStack replacement = STATIC_REPLACEMENTS.getOrDefault(item, ItemStack.EMPTY);
+
+        if (!replacement.isEmpty()) {
+            pStack.setTag(replacement.getTag());
+            return;
+        }
+
         if (invoker == null) {
             LootReplacer.LOGGER.warn("Unprepared Script Engine");
             return;
         }
-        Item item = pStack.getItem();
         JSFunction function = REPLACER_MAP.get(item);
 
         if (function != null) {
